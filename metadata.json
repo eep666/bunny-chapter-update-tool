@@ -1,0 +1,5 @@
+{
+  "name": "Bunny.net Chapter Update Tool",
+  "description": "An internal tool for development teams to bulk-add or update video chapters using the Bunny.net Video API. Paste chapter data in the format 'start_seconds, end_seconds, Title' and update a video's chapters with a single click.",
+  "requestFramePermissions": []
+}
