@@ -80,18 +80,18 @@ const App = () => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const [apiResponse, setApiResponse] = useState<any>(null);
-    const [errorMessage, setErrorMessage] = useState('');
+    const [message, setMessage] = useState<{text: string, type: 'info' | 'error'} | null>(null);
 
     // Check if the Gemini API key is available in the environment
     const geminiApiKeyAvailable = !!process.env.API_KEY;
 
     const handleGenerateJson = useCallback(async () => {
         if (!bodyContent) {
-            setErrorMessage("The text area is empty. Please add chapter notes.");
+            setMessage({ text: "The text area is empty. Please add chapter notes.", type: 'error' });
             return;
         }
         setIsGenerating(true);
-        setErrorMessage('');
+        setMessage(null);
         setApiResponse(null);
 
         try {
@@ -99,43 +99,56 @@ const App = () => {
            setBodyContent(jsonText);
         } catch (error) {
             const msg = error instanceof Error ? error.message : "An unknown error occurred during JSON generation.";
-            setErrorMessage(msg);
+            setMessage({ text: msg, type: 'error' });
         } finally {
             setIsGenerating(false);
         }
     }, [bodyContent]);
 
     const handleSendRequest = useCallback(async () => {
+        setMessage(null);
         setApiResponse(null);
 
         if (!apiKey || !apiUrl || !bodyContent) {
-            setErrorMessage('API Key, Request URL, and a Request Body are required.');
+            setMessage({ text: 'API Key, Request URL, and a Request Body are required.', type: 'error' });
             return;
         }
 
         setIsSending(true);
-        setErrorMessage('');
         
         let bodyForRequest = bodyContent;
-        let needsGeneration = false;
+        let isJson = true;
         try {
             JSON.parse(bodyContent);
         } catch (e) {
-            needsGeneration = true;
+            isJson = false;
         }
         
-        try {
-            if (needsGeneration) {
-                if (!geminiApiKeyAvailable) {
-                    throw new Error("The content is not valid JSON, and the AI feature is disabled because no Gemini API key is configured for this app.");
-                }
-                setErrorMessage("Input is not JSON. Auto-generating with AI before sending...");
-                const generatedJson = await generateJsonFromNotes(bodyContent);
-                setBodyContent(generatedJson); // Update the UI to show what's being sent
-                bodyForRequest = generatedJson;
-                setErrorMessage(''); // Clear intermediate message
+        if (!isJson) {
+            if (!geminiApiKeyAvailable) {
+                setMessage({
+                    text: "Input is not valid JSON. The AI feature is disabled because no Gemini API key is configured. Please provide data in the correct JSON format or configure the AI key.",
+                    type: 'error',
+                });
+                setIsSending(false);
+                return;
             }
 
+            try {
+                setMessage({ text: "Input is not JSON. Auto-generating with AI...", type: 'info' });
+                const generatedJson = await generateJsonFromNotes(bodyContent);
+                setBodyContent(generatedJson);
+                bodyForRequest = generatedJson;
+                setMessage(null); // Clear info message
+            } catch (aiError) {
+                const msg = aiError instanceof Error ? aiError.message : "An unknown error occurred during AI generation.";
+                setApiResponse({ success: false, status: 'AI Error', data: { message: msg } });
+                setIsSending(false);
+                return;
+            }
+        }
+
+        try {
             const parsedBody = JSON.parse(bodyForRequest);
 
             const res = await fetch(apiUrl, {
@@ -158,9 +171,7 @@ const App = () => {
             }
         } catch (error) {
             const msg = error instanceof Error ? error.message : "An unknown network error occurred.";
-            // Show the error in the response block for consistency
             setApiResponse({ success: false, status: 'Application Error', data: { message: msg } });
-            setErrorMessage(''); // Clear any intermediate messages
         } finally {
             setIsSending(false);
         }
@@ -173,7 +184,15 @@ const App = () => {
         <div className="min-h-screen flex items-start justify-center p-4 sm:p-6 lg:p-8">
             <div className="w-full max-w-4xl mx-auto space-y-6">
                 <div className="text-center">
-                    <h1 className="text-3xl font-bold text-white">Bunny.net Chapter Update Tool</h1>
+                    <div className="flex items-center justify-center gap-4">
+                        <h1 className="text-3xl font-bold text-white">Bunny.net Chapter Update Tool</h1>
+                        <span 
+                            title={geminiApiKeyAvailable ? "The Gemini API Key is configured correctly in the environment." : "The Gemini API key is missing from the environment variables."}
+                            className={`px-3 py-1 text-xs font-semibold rounded-full ${geminiApiKeyAvailable ? 'bg-green-800 text-green-200' : 'bg-gray-700 text-gray-400'}`}
+                        >
+                            {geminiApiKeyAvailable ? 'AI Enabled' : 'AI Disabled'}
+                        </span>
+                    </div>
                 </div>
                 
                 <div className="bg-gray-800 shadow-2xl rounded-xl p-6 space-y-5">
@@ -230,10 +249,10 @@ const App = () => {
                 {/* Response Area */}
                 <div className="bg-gray-800 shadow-2xl rounded-xl p-6 min-h-[150px]">
                    <h3 className="text-lg font-semibold text-white mb-3">Response</h3>
-                   {errorMessage && (
-                      <div className="p-4 text-sm rounded-lg bg-blue-900 text-blue-300" role="status">
-                         <span className="font-medium">Info:</span> {errorMessage}
-                      </div>
+                   {message && (
+                        <div className={`p-4 mb-4 text-sm rounded-lg ${message.type === 'error' ? 'bg-red-900 text-red-300' : 'bg-blue-900 text-blue-300'}`} role={message.type === 'error' ? 'alert' : 'status'}>
+                            <span className="font-medium">{message.type === 'error' ? 'Error:' : 'Info:'}</span> {message.text}
+                        </div>
                    )}
                    {apiResponse ? (
                       <div className="space-y-3">
@@ -245,7 +264,7 @@ const App = () => {
                          </div>
                          <CodeBlock content={JSON.stringify(apiResponse.data, null, 2)} language="json" />
                       </div>
-                   ) : (!errorMessage && <p className="text-gray-500 text-sm">Click 'Send' to get a response.</p>)
+                   ) : (!message && <p className="text-gray-500 text-sm">Click 'Send' to get a response.</p>)
                    }
                 </div>
                  <div className="mt-6 p-4 bg-yellow-900 border-l-4 border-yellow-500 text-yellow-300 text-sm rounded-r-lg">
